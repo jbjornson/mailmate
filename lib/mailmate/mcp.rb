@@ -16,6 +16,7 @@ require "mailmate/cli/tags"
 require "mailmate/eml_lookup"
 require "mailmate/header_reader"
 require "mailmate/mid_url"
+require "mailmate/draft_reviser"
 
 module Mailmate
   # Stdio MCP server (JSON-RPC 2.0, line-delimited). Exposes the gem's CLIs —
@@ -54,6 +55,9 @@ module Mailmate
       - Prefer `draft` over `send` whenever the user said "don't send" / "just
         draft it" — `draft` physically cannot send, so it's the safe choice.
         `send` also opens a draft and waits unless you pass `send_now: true`.
+      - To change a saved draft, use `revise_draft`. MailMate can't edit a draft
+        in place, so it saves the revised copy and moves the old one to Trash.
+        Read the draft first with `message` if you only want to tweak it.
       - Replying: pass `reply_to` (the parent's eml-id or Message-ID) and the
         threading headers, recipient and "Re:" subject are derived for you.
         `reply_all_to` replies to all; `forward` forwards (supply `to`).
@@ -291,6 +295,26 @@ module Mailmate
         },
       },
       {
+        name: "revise_draft",
+        title: "Revise a draft",
+        annotations: { title: "Revise a draft", readOnlyHint: false, destructiveHint: false },
+        description: "Replace a saved draft with a revised version. Never sends. MailMate can't edit a draft in place, so this saves a new draft with your changes (fields you leave out are copied from the old draft, including reply threading) and then moves the old draft to Trash through MailMate. The old draft is only touched after the new one is saved and only when MailMate selects exactly that draft; otherwise it stays put and the result says why. Returns the new draft's eml-id for further revisions.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            id: { type: "string", description: "eml-id or RFC Message-ID of the draft to replace (it must be in a Drafts mailbox)." },
+            from: { type: "string", description: "New sender identity. Omit to keep the old one." },
+            to: { type: "string", description: "New recipient(s), comma-separated. Omit to keep the old ones." },
+            cc: { type: "string", description: "New CC recipient(s). Omit to keep; pass an empty string to clear." },
+            bcc: { type: "string", description: "New BCC recipient(s). Omit to keep; pass an empty string to clear." },
+            subject: { type: "string", description: "New subject. Omit to keep the old one." },
+            body: { type: "string", description: "New markdown body (the whole body). Omit to keep the old one." },
+          },
+          required: %w[id],
+          additionalProperties: false,
+        },
+      },
+      {
         name: "open",
         title: "Open in MailMate",
         annotations: { title: "Open in MailMate", readOnlyHint: false, destructiveHint: false },
@@ -428,6 +452,7 @@ module Mailmate
       when "verify"         then call_verify(args)
       when "send"           then send_enabled? ? call_send(args) : text_error(SEND_DISABLED_MESSAGE)
       when "draft"          then call_draft(args)
+      when "revise_draft"   then call_revise_draft(args)
       when "open"           then call_open(args)
       when "list_mailboxes" then call_list_mailboxes(args)
       when "list_tags"      then call_list_tags(args)
@@ -527,6 +552,10 @@ module Mailmate
 
     # `draft` mirrors `send` but never sends — it has no send_now option and
     # routes through CLI::Draft, which refuses `--send-now` outright.
+    def call_revise_draft(args)
+      Mailmate::DraftReviser.revise(args, compose: ->(a) { call_draft(a) })
+    end
+
     def call_draft(args)
       (err = recipient_check(args)) and return err
 

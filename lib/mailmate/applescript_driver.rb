@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "open3"
 require "shellwords"
 
 module Mailmate
@@ -56,6 +57,38 @@ module Mailmate
       out = `osascript -e 'tell application "MailMate" to get id of every window' 2>&1`
       return [] unless $?.success?
       out.strip.split(",").map { |s| s.strip.to_i }
+    end
+
+    # [[id, name], ...] for MailMate's windows. Empty if MailMate isn't
+    # running or `osascript` errors.
+    def windows
+      return [] if dry_run
+      out, status = Open3.capture2("osascript", "-", stdin_data: <<~AS)
+        tell application "MailMate"
+          set out to ""
+          repeat with w in windows
+            set out to out & (id of w) & tab & (name of w) & linefeed
+          end repeat
+          return out
+        end tell
+      AS
+      return [] unless status.success?
+      out.each_line.map do |line|
+        id, name = line.chomp.split("\t", 2)
+        [id.to_i, name.to_s]
+      end
+    end
+
+    # Run a (possibly multi-line) script and return its result text.
+    def evaluate(script)
+      Mailmate::PlatformError.check_darwin!(component: "AppleScriptDriver") unless dry_run
+      if dry_run
+        @output.puts "DRY: osascript <<#{script.inspect}"
+        return ""
+      end
+      out, err, status = Open3.capture3("osascript", "-", stdin_data: script)
+      raise Error, "osascript exited #{status.exitstatus}: #{err.strip}" unless status.success?
+      out.strip
     end
 
     # Close every window in `ids`. No-op for IDs that no longer exist.
