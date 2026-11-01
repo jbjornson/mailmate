@@ -131,9 +131,13 @@ module Mailmate
         data = JSON.parse(json) rescue {}
         ids = data["identities"] || data["Identities"] || []
 
+        # Entries can carry display names ("Jane Doe <jane@x.com>, Team
+        # (Ops) <ops@x.com>"), so pull out the addresses rather than
+        # splitting on whitespace, which would keep "<jane@x.com>" and turn
+        # every name word into a bogus identity.
         all = ids.flat_map do |i|
           raw = i["emailAddresses"] || i["EmailAddresses"] || i["emailAddress"] || ""
-          raw.to_s.split(/[\s,]+/)
+          raw.to_s.scan(/[^\s<>,;()"']+@[^\s<>,;()"']+/)
         end
         all.map { |a| a.strip.downcase }.reject(&:empty?).uniq
       end
