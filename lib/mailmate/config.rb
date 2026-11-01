@@ -47,8 +47,16 @@ module Mailmate
 
     # Derived paths. Each follows from app_support_dir; if a user has a
     # non-default MailMate install, overriding app_support_dir flows through.
+    # MailMate names the store `Messages.noindex` by default and `Messages`
+    # when Spotlight indexing of messages is enabled. Prefer `.noindex`, fall
+    # back to `Messages` if only that exists. Checked on every call so a
+    # Spotlight toggle while a long-lived MCP server runs is picked up.
     def imap_root
-      File.join(app_support_dir, "Messages.noindex", "IMAP")
+      noindex = File.join(app_support_dir, "Messages.noindex", "IMAP")
+      return noindex if File.directory?(noindex)
+
+      indexed = File.join(app_support_dir, "Messages", "IMAP")
+      File.directory?(indexed) ? indexed : noindex
     end
 
     def db_headers
