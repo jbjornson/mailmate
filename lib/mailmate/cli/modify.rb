@@ -193,7 +193,10 @@ module Mailmate
         # - Simpler mental model: pure-move = silent + fast; mixed = all-UI.
         fast_moves, other = actions.partition { |name, _, _| name == "move" }
 
-        if other.empty? && !fast_moves.empty?
+        # Opt-in: on MailMate 2.0 (6292) a rename on disk was never picked up
+        # (the #source index kept the old mailbox and nothing moved on the
+        # server), leaving MailMate out of step with the files.
+        if fast_move_enabled? && other.empty? && !fast_moves.empty?
           ok = true
           current_path = Mailmate::EmlLookup.path_for(eml_id)
           fast_moves.each do |_name, selector, args|
@@ -212,6 +215,14 @@ module Mailmate
           # AppleScript driver in the user-supplied order.
           drive_via_applescript(eml_id, message_id, actions, opts)
         end
+      end
+
+      FAST_MOVE_ENV = "MAILMATE_FAST_MOVE"
+
+      # The on-disk rename path for pure moves runs only with
+      # MAILMATE_FAST_MOVE=1; otherwise MailMate performs the move itself.
+      def fast_move_enabled?(env = ENV)
+        env[FAST_MOVE_ENV] == "1"
       end
 
       # Returns the new path on success (or in dry-run, the path we *would*

@@ -294,8 +294,9 @@ mm-modify 183715 read flag archive
 # Add a tag
 mm-modify 183715 tag urgent
 
-# Pure-move (one or more moves, nothing else): same-account moves take a
-# fast path — direct .eml rename on disk, no UI, no focus theft.
+# Move: MailMate performs it (moveToMailbox:), so the server follows.
+# MAILMATE_FAST_MOVE=1 opts back into the old same-account fast path (a
+# direct .eml rename on disk), which MailMate 2.0 (6292) did not pick up.
 mm-modify 183715 move Archive
 
 # Chain with other actions: everything (including the move) goes through
@@ -423,7 +424,7 @@ The `mm` prefix is for tab completion: typing `mm<tab>` in a shell lists every c
 
 A few rough edges to be aware of:
 
-1. **Non-move `mm-modify` actions briefly spawn a MailMate viewer window.** Same-account `move` actions use a fast path — a direct `.eml` rename on disk — so they're entirely silent. Everything else (`read`, `flag`, `tag`, `archive`, `junk`, `delete`, etc.) drives MailMate's URL handler: each invocation opens a message-viewer window via the `mid:` URL in the background, runs AppleScript key-binding selectors against it, then closes the window.
+1. **`mm-modify` actions briefly spawn a MailMate viewer window.** With `MAILMATE_FAST_MOVE=1`, same-account `move` actions instead use a direct `.eml` rename on disk; that is off by default because MailMate 2.0 (6292) did not register such renames. Every action (`read`, `flag`, `tag`, `archive`, `junk`, `delete`, etc.) drives MailMate's URL handler: each invocation opens a message-viewer window via the `mid:` URL in the background, runs AppleScript key-binding selectors against it, then closes the window.
 
    **As of 1.2.0 this runs in the background.** MailMate is not brought to the foreground, your keyboard focus stays in whatever app you were using, and you can keep working — even during bulk loops. The viewer windows still appear briefly in MailMate's own window list before closing, but they don't take over your screen. The previous behavior (full-screen takeover, close-keystroke landing on the wrong window) is gone.
 
@@ -470,7 +471,7 @@ A few rough edges to be aware of:
 | `mmopen` | Open one message in MailMate's UI (via `open mid:…`). `--print` returns the URL. |
 | `mm-mailboxes` | List accounts, IMAP mailboxes (with optional counts), and smart-mailbox names. |
 | `mmtags` | List user tags applied to messages (with counts) or defined in Preferences. |
-| `mm-modify` | Mark read/flag/tag/archive a message via AppleScript; same-account `move` uses a fast `.eml`-rename path with no UI takeover. `--check` confirms the change landed; `--emit-check` defers confirmation to `mm-verify`. |
+| `mm-modify` | Mark read/flag/tag/archive a message via AppleScript; `move` goes through MailMate too (`MAILMATE_FAST_MOVE=1` for the on-disk rename). `--check` confirms the change landed; `--emit-check` defers confirmation to `mm-verify`. |
 | `mm-verify` | Batch-confirm `mm-modify --emit-check` tickets against the `#flags` index in one flush-wait. JSON in, JSON summary out. |
 | `mm-send` | Send mail through `emate` with a markdown body on stdin. |
 | `mm-draft` | Like `mm-send`, but only ever opens a draft — refuses `--send-now` (exit 2). |
