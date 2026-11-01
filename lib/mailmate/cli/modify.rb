@@ -321,8 +321,13 @@ module Mailmate
           driver.open_url(mid_url)
           new_windows = wait_for_new_window(driver, windows_before, timeout: opts[:settle])
           if new_windows.empty?
-            warn "WARNING: no MailMate viewer window appeared for #{mid_url} (retried once)."
-            warn "         The action target is UNCONFIRMED — it may hit the wrong message or no-op."
+            # Acting now would hit whatever MailMate has selected, so stop.
+            # This happens when the message is already open (e.g. a draft in
+            # a composer window) or a dialog in MailMate is in the way.
+            warn "REFUSED: no MailMate viewer window appeared for #{mid_url} (retried once)."
+            warn "         Nothing was changed. Close any window showing this message (or a"
+            warn "         dialog in MailMate) and try again."
+            return false
           end
         end
 

@@ -338,6 +338,34 @@ class TestCliModify < Minitest::Test
     assert_equal 2, fast_calls
   end
 
+  # ---- no viewer window: refuse instead of acting on the selection ----
+
+  class NoWindowDriver
+    attr_reader :performed, :opens
+
+    def initialize(*) = (@performed = []; @opens = 0)
+    def window_ids = [1]
+    def open_url(_url) = @opens += 1
+    def perform(selector, *args) = @performed << [selector, *args]
+    def close_windows(_ids) = nil
+  end
+
+  def test_drive_via_applescript_refuses_when_no_viewer_window_appears
+    driver = NoWindowDriver.new
+    ok = nil
+    _out, err = capture_io do
+      Mailmate::AppleScriptDriver.stub(:new, driver) do
+        M.stub(:should_preserve_unread?, false) do
+          ok = M.drive_via_applescript(42, "<m@x>", [["delete", "deleteMessage:", []]], { settle: 0.01 })
+        end
+      end
+    end
+    refute ok, "must report failure when the target window never appeared"
+    assert_empty driver.performed, "must not perform any selector without a viewer window"
+    assert_equal 2, driver.opens, "opens once, then retries once"
+    assert_match(/REFUSED/, err)
+  end
+
   # ---- verifiable_expectations: which chains get effect-checked ----
 
   def test_verifiable_expectations_for_simple_flag_actions
