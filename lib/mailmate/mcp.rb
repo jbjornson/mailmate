@@ -41,6 +41,9 @@ module Mailmate
       `open` require MailMate to be running (they drive the app).
 
       Composing (send / draft)
+      - `send` is only offered when the server runs with
+        MAILMATE_MCP_ENABLE_SEND=1. Without it, compose with `draft` and let
+        the user review and send from MailMate.
       - Bodies are Markdown; MailMate renders them to HTML on the way out. For
         that to reach recipients, MailMate → Preferences → Composer must have
         "Preview: Display" = Always and "Replying/Forwarding HTML" = Always
@@ -355,6 +358,21 @@ module Mailmate
       },
     ].freeze
 
+    # Sending is opt-in. Mail content reaches the model, so a message could try
+    # to talk it into sending; with `send` off, the worst it can do is a draft
+    # the user reviews.
+    SEND_ENV = "MAILMATE_MCP_ENABLE_SEND"
+    SEND_DISABLED_MESSAGE = "Sending is disabled on this server (set #{SEND_ENV}=1 to enable). " \
+                            "Use the `draft` tool instead; the user can send it from MailMate."
+
+    def send_enabled?(env = ENV)
+      env[SEND_ENV] == "1"
+    end
+
+    def tools_list(env = ENV)
+      send_enabled?(env) ? TOOLS : TOOLS.reject { |t| t[:name] == "send" }
+    end
+
     def run(stdin: $stdin, stdout: $stdout)
       stdin.binmode
       stdout.binmode
@@ -389,7 +407,7 @@ module Mailmate
       when "notifications/initialized", "notifications/cancelled"
         # notifications — no response
       when "tools/list"
-        write(stdout, jsonrpc_result(id, { tools: TOOLS }))
+        write(stdout, jsonrpc_result(id, { tools: tools_list }))
       when "tools/call"
         params = msg["params"] || {}
         result = dispatch(params["name"], params["arguments"] || {})
@@ -408,7 +426,7 @@ module Mailmate
       when "message"        then call_message(args)
       when "modify"         then call_modify(args)
       when "verify"         then call_verify(args)
-      when "send"           then call_send(args)
+      when "send"           then send_enabled? ? call_send(args) : text_error(SEND_DISABLED_MESSAGE)
       when "draft"          then call_draft(args)
       when "open"           then call_open(args)
       when "list_mailboxes" then call_list_mailboxes(args)

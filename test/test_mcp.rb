@@ -29,6 +29,43 @@ class TestMCP < Minitest::Test
     end
   end
 
+  # ---- send is opt-in ----
+
+  def test_send_is_hidden_from_tools_list_by_default
+    names = S.tools_list({}).map { |t| t[:name] }
+    refute_includes names, "send"
+    assert_includes names, "draft"
+  end
+
+  def test_send_is_listed_when_enabled
+    names = S.tools_list({ "MAILMATE_MCP_ENABLE_SEND" => "1" }).map { |t| t[:name] }
+    assert_includes names, "send"
+  end
+
+  def test_send_stays_off_for_values_other_than_1
+    refute S.send_enabled?({ "MAILMATE_MCP_ENABLE_SEND" => "true" })
+    refute S.send_enabled?({ "MAILMATE_MCP_ENABLE_SEND" => "" })
+  end
+
+  def test_dispatch_refuses_send_when_disabled
+    S.stub(:send_enabled?, false) do
+      S.stub(:call_send, ->(_a) { flunk "call_send must not run while sending is disabled" }) do
+        res = S.dispatch("send", { "to" => "a@b.c", "body" => "hi", "send_now" => true })
+        assert res[:isError]
+        assert_match(/Sending is disabled/, res[:content].first[:text])
+      end
+    end
+  end
+
+  def test_dispatch_runs_send_when_enabled
+    S.stub(:send_enabled?, true) do
+      S.stub(:call_send, ->(_a) { { content: [{ type: "text", text: "sent" }], isError: false } }) do
+        res = S.dispatch("send", { "to" => "a@b.c", "body" => "hi" })
+        refute res[:isError]
+      end
+    end
+  end
+
   def test_dispatch_survives_system_exit
     # A CLI path that calls exit/abort (e.g. a missing optional gem) must be
     # contained — SystemExit isn't a StandardError, so this is the clause that
