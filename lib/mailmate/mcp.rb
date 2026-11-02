@@ -483,8 +483,9 @@ module Mailmate
       argv.push("--european")                        if args["european"]
       # Always ask for the stats line: it carries the true match total and
       # the truncation facts as one JSON object, first on stderr, in place
-      # of the prose notices. It stays in the text (readable as-is) and is
-      # ALSO surfaced as structuredContent for clients that render it.
+      # of the prose notices. It stays in the text only. It is not also sent
+      # as structuredContent: clients that support that field (Claude Code
+      # among them) show it in place of the text, which hid the result rows.
       argv.push("--stats")
       # Positionals: search-string then fields. Only include if the caller
       # gave us either — otherwise let the CLI apply its defaults.
@@ -492,12 +493,7 @@ module Mailmate
         argv << (args["query"] || "")
         argv << args["fields"].to_s if args["fields"]
       end
-      res = run_cli(Mailmate::CLI::Search, argv)
-      if (m = res[:content].first[:text].match(/^#{Regexp.escape(Mailmate::CLI::Search::STATS_PREFIX)}(\{.*\})$/))
-        stats = (JSON.parse(m[1]) rescue nil)
-        res[:structuredContent] = { stats: stats } if stats
-      end
-      res
+      run_cli(Mailmate::CLI::Search, argv)
     end
 
     def call_message(args)

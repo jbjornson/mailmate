@@ -298,15 +298,19 @@ class TestMcpSearchLimitAndSort < Minitest::Test
     assert_equal ["--limit", "200", "--offset", "1000", "--stats", "x"], seen
   end
 
-  def test_call_search_surfaces_the_stats_line_as_structured_content
+  # Clients that support structuredContent show it instead of the text, so
+  # sending the stats there hid the rows. Rows and stats both stay in the text.
+  def test_call_search_keeps_rows_and_stats_in_the_text_only
     fake = lambda do |_argv|
       warn 'stats: {"schema":1,"matches":321,"returned":3,"scan_capped":false}'
       puts "id\n1"
       0
     end
     res = Mailmate::CLI::Search.stub(:run, fake) { S.dispatch("search", "query" => "x") }
-    assert_equal 321, res[:structuredContent][:stats]["matches"]
-    assert_includes res[:content].first[:text], "stats: {", "the line stays readable in the text too"
+    refute res.key?(:structuredContent)
+    text = res[:content].first[:text]
+    assert_includes text, "id\n1"
+    assert_includes text, 'stats: {"schema":1,"matches":321'
   end
 
   def test_call_search_leaves_a_malformed_stats_line_as_text
