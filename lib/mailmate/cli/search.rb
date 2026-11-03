@@ -386,6 +386,11 @@ module Mailmate
           o.on("--exclude-quoted", "Match body only against #unquoted text — skip MailMate's #quoted index (forwarded/replied-to text). Tightens search to fresh content; gets you closer to MailMate UI's body-search result set, at the cost of missing hits in quoted sections.") { opts[:exclude_quoted] = true }
           o.on("--no-header", "Suppress column header row") { opts[:header] = false }
           o.on("--no-align", "Plain CSV (no column padding)") { opts[:align] = false }
+          o.on("--max-cell N", Integer,
+               "Shorten any value longer than N characters, ending it with …") { |n|
+            raise OptionParser::InvalidArgument, "#{n}: max-cell must be at least 2" if n < 2
+            opts[:max_cell] = n
+          }
           o.on("--sort KEY[:DIR]",
                "Order of the emitted rows. asc|desc|none alone mean date; or any output field, e.g. from, subject:desc (bare date/time = desc, text keys = asc). Ties break newest-first. Default: date:asc") { |v| opts[:sort] = parse_order(v, allow_none: true) }
           o.on("--stats",
@@ -1540,8 +1545,21 @@ module Mailmate
 
       # ---- output -------------------------------------------------------------
 
+      # Aligned output pads a column only to the widest value up to this
+      # many characters. A longer value runs past the column on its own row
+      # instead of widening every row: one spam subject of 5,000 spaces
+      # used to make each row 5,800 characters.
+      ALIGN_MAX_WIDTH = 120
+
+      # Aligned output is for reading, so runs of whitespace (newlines
+      # included) become one space before shortening and quoting. Plain CSV
+      # (--no-align) keeps values as-is.
+      def display_cell(cell, max)
+        csv_quote(shorten(cell.to_s.gsub(/\s+/, " "), max))
+      end
+
       def csv_quote(cell)
-        cell = cell.to_s.gsub(/[\r\n]+/, " ")
+        cell = cell.to_s
         if cell.include?(",") || cell.include?("\"")
           "\"#{cell.gsub("\"", "\"\"")}\""
         else
@@ -1549,15 +1567,23 @@ module Mailmate
         end
       end
 
+      def shorten(cell, max)
+        cell = cell.to_s
+        max && cell.length > max ? "#{cell[0, max - 1]}…" : cell
+      end
+
       def emit_output(rows, fields, opts)
         header_row = fields.map { |f| HEADER_LABELS[f] || f }
+        max = opts[:max_cell]
 
         if opts[:align]
-          display_rows = rows.map { |r| r.map { |c| csv_quote(c) } }
+          display_rows = rows.map { |r| r.map { |c| display_cell(c, max) } }
           display_rows.unshift(header_row) if opts[:header]
           widths = Array.new(fields.size, 0)
           display_rows.each do |r|
-            r.each_with_index { |c, i| widths[i] = c.length if c.length > widths[i] }
+            r.each_with_index do |c, i|
+              widths[i] = c.length if c.length > widths[i] && c.length <= ALIGN_MAX_WIDTH
+            end
           end
           display_rows.each do |r|
             padded = r.each_with_index.map do |c, i|
@@ -1567,7 +1593,7 @@ module Mailmate
           end
         else
           puts CSV.generate_line(header_row) if opts[:header]
-          rows.each { |r| puts CSV.generate_line(r) }
+          rows.each { |r| puts CSV.generate_line(r.map { |c| shorten(c, max) }) }
         end
       end
     end

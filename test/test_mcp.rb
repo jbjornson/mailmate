@@ -274,7 +274,7 @@ class TestMcpSearchLimitAndSort < Minitest::Test
                            "scan_limit" => 500, "sort" => "from:desc")
     end
     assert_equal ["--limit", "10", "--limit-by", "date:asc", "--scan-limit", "500",
-                  "--sort", "from:desc", "--stats", "f bob"], seen
+                  "--sort", "from:desc", "--stats", "--max-cell", "200", "f bob"], seen
   end
 
   def test_call_search_passes_the_truncation_notice_through_on_success
@@ -295,7 +295,7 @@ class TestMcpSearchLimitAndSort < Minitest::Test
     Mailmate::CLI::Search.stub(:run, ->(argv) { seen = argv; 0 }) do
       S.dispatch("search", "query" => "x", "limit" => 200, "offset" => 1000)
     end
-    assert_equal ["--limit", "200", "--offset", "1000", "--stats", "x"], seen
+    assert_equal ["--limit", "200", "--offset", "1000", "--stats", "--max-cell", "200", "x"], seen
   end
 
   # Clients that support structuredContent show it instead of the text, so

@@ -1245,3 +1245,50 @@ class TestCliSearchLimitAndSort < Minitest::Test
     assert_includes err, "unknown field"
   end
 end
+
+# Output formatting: one very long value (spam subjects can be thousands of
+# spaces) must not widen every row.
+class TestCliSearchOutput < Minitest::Test
+  S = Mailmate::CLI::Search
+
+  def emit(rows, fields, **opts)
+    out, = capture_io { S.emit_output(rows, fields, { header: false, align: true }.merge(opts)) }
+    out.lines.map(&:chomp)
+  end
+
+  def test_a_value_past_the_cap_does_not_widen_other_rows
+    long = "x" * (S::ALIGN_MAX_WIDTH + 1)
+    lines = emit([["1", "short", "a"], ["2", long, "b"]], %w[id subject mailbox])
+    assert_equal "1,short,a", lines[0]
+    assert_equal "2,#{long},b", lines[1]
+  end
+
+  def test_values_under_the_cap_still_align
+    lines = emit([["1", "ab", "a"], ["2", "abcd", "b"]], %w[id subject mailbox])
+    assert_equal ["1,ab  ,a", "2,abcd,b"], lines
+  end
+
+  def test_aligned_output_collapses_whitespace_runs
+    lines = emit([["1", "Promo#{" " * 3000}now\r\nend", "a"]], %w[id subject mailbox])
+    assert_equal ["1,Promo now end,a"], lines
+  end
+
+  def test_max_cell_shortens_after_collapsing_and_before_quoting
+    lines = emit([["1", "a,b    c d e f", "x"]], %w[id subject mailbox], max_cell: 6)
+    assert_equal [%(1,"a,b c…",x)], lines
+  end
+
+  def test_plain_csv_keeps_whitespace_but_honours_max_cell
+    plain = emit([["1", "a   b"]], %w[id subject], align: false)
+    assert_equal ["1,a   b"], plain
+    short = emit([["1", "abcdefgh"]], %w[id subject], align: false, max_cell: 4)
+    assert_equal ["1,abc…"], short
+  end
+
+  def test_max_cell_below_two_is_a_usage_error
+    code = nil
+    _, err = capture_io { code = S.run(["", "--max-cell", "1"]) }
+    assert_equal 2, code
+    assert_match(/max-cell must be at least 2/, err)
+  end
+end

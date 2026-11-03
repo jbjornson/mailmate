@@ -87,6 +87,9 @@ module Mailmate
         convert between them and to mint a cross-machine message:// URL.
     INSTRUCTIONS
 
+    # `search` shortens longer values (see call_search).
+    SEARCH_MAX_CELL = 200
+
     TOOLS = [
       {
         name: "search",
@@ -95,6 +98,8 @@ module Mailmate
         description: <<~DESC.strip,
           Search MailMate's .eml files using MailMate's quicksearch syntax.
           Returns column-aligned CSV. Same engine as the `mmsearch` CLI.
+          Values longer than #{SEARCH_MAX_CELL} characters are shortened and end
+          in …; use `message` for the full text.
 
           The only native key:value specs are the state forms below
           (is:unread, has:attachment). Other familiar foreign tokens
@@ -487,6 +492,9 @@ module Mailmate
       # as structuredContent: clients that support that field (Claude Code
       # among them) show it in place of the text, which hid the result rows.
       argv.push("--stats")
+      # Spam subjects can run to thousands of characters, which can push a
+      # reply past what the client will show.
+      argv.push("--max-cell", SEARCH_MAX_CELL.to_s)
       # Positionals: search-string then fields. Only include if the caller
       # gave us either — otherwise let the CLI apply its defaults.
       if args.key?("query") || args["fields"]
