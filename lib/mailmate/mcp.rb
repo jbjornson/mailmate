@@ -499,9 +499,19 @@ module Mailmate
       # gave us either — otherwise let the CLI apply its defaults.
       if args.key?("query") || args["fields"]
         argv << (args["query"] || "")
-        argv << args["fields"].to_s if args["fields"]
+        argv << search_fields(args["fields"].to_s) if args["fields"]
       end
       run_cli(Mailmate::CLI::Search, argv)
+    end
+
+    # The tool promises `id` as the first column, since the other tools act
+    # on it. The CLI lets a bare field list leave it out, so add it here.
+    # A "+..." list already starts from the defaults, which include it.
+    def search_fields(fields)
+      return fields if fields.strip.start_with?("+")
+      names = fields.split(/[\s,]+/).reject(&:empty?)
+      return fields if names.empty?
+      (["id"] + (names - ["id"])).join(" ")
     end
 
     def call_message(args)

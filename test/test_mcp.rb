@@ -298,6 +298,24 @@ class TestMcpSearchLimitAndSort < Minitest::Test
     assert_equal ["--limit", "200", "--offset", "1000", "--stats", "--max-cell", "200", "x"], seen
   end
 
+  # The description promises id as the first column; the CLI lets a bare
+  # list drop it, so the MCP layer puts it back.
+  def test_call_search_puts_id_first_in_a_bare_field_list
+    {
+      "flags time subject"   => "id flags time subject",
+      "subject,message-id"   => "id subject message-id",
+      "subject id mailbox"   => "id subject mailbox",
+      "id subject"           => "id subject",
+      "+tags"                => "+tags",
+    }.each do |given, expected|
+      seen = nil
+      Mailmate::CLI::Search.stub(:run, ->(argv) { seen = argv; 0 }) do
+        S.dispatch("search", "query" => "x", "fields" => given)
+      end
+      assert_equal expected, seen.last, "fields #{given.inspect}"
+    end
+  end
+
   # Clients that support structuredContent show it instead of the text, so
   # sending the stats there hid the rows. Rows and stats both stay in the text.
   def test_call_search_keeps_rows_and_stats_in_the_text_only
