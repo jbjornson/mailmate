@@ -29,6 +29,43 @@ class TestMCP < Minitest::Test
     end
   end
 
+  # ---- send is opt-in ----
+
+  def test_send_is_hidden_from_tools_list_by_default
+    names = S.tools_list({}).map { |t| t[:name] }
+    refute_includes names, "send"
+    assert_includes names, "draft"
+  end
+
+  def test_send_is_listed_when_enabled
+    names = S.tools_list({ "MAILMATE_MCP_ENABLE_SEND" => "1" }).map { |t| t[:name] }
+    assert_includes names, "send"
+  end
+
+  def test_send_stays_off_for_values_other_than_1
+    refute S.send_enabled?({ "MAILMATE_MCP_ENABLE_SEND" => "true" })
+    refute S.send_enabled?({ "MAILMATE_MCP_ENABLE_SEND" => "" })
+  end
+
+  def test_dispatch_refuses_send_when_disabled
+    S.stub(:send_enabled?, false) do
+      S.stub(:call_send, ->(_a) { flunk "call_send must not run while sending is disabled" }) do
+        res = S.dispatch("send", { "to" => "a@b.c", "body" => "hi", "send_now" => true })
+        assert res[:isError]
+        assert_match(/Sending is disabled/, res[:content].first[:text])
+      end
+    end
+  end
+
+  def test_dispatch_runs_send_when_enabled
+    S.stub(:send_enabled?, true) do
+      S.stub(:call_send, ->(_a) { { content: [{ type: "text", text: "sent" }], isError: false } }) do
+        res = S.dispatch("send", { "to" => "a@b.c", "body" => "hi" })
+        refute res[:isError]
+      end
+    end
+  end
+
   def test_dispatch_survives_system_exit
     # A CLI path that calls exit/abort (e.g. a missing optional gem) must be
     # contained — SystemExit isn't a StandardError, so this is the clause that
@@ -237,7 +274,7 @@ class TestMcpSearchLimitAndSort < Minitest::Test
                            "scan_limit" => 500, "sort" => "from:desc")
     end
     assert_equal ["--limit", "10", "--limit-by", "date:asc", "--scan-limit", "500",
-                  "--sort", "from:desc", "--stats", "f bob"], seen
+                  "--sort", "from:desc", "--stats", "--max-cell", "200", "f bob"], seen
   end
 
   def test_call_search_passes_the_truncation_notice_through_on_success
@@ -258,18 +295,40 @@ class TestMcpSearchLimitAndSort < Minitest::Test
     Mailmate::CLI::Search.stub(:run, ->(argv) { seen = argv; 0 }) do
       S.dispatch("search", "query" => "x", "limit" => 200, "offset" => 1000)
     end
-    assert_equal ["--limit", "200", "--offset", "1000", "--stats", "x"], seen
+    assert_equal ["--limit", "200", "--offset", "1000", "--stats", "--max-cell", "200", "x"], seen
   end
 
-  def test_call_search_surfaces_the_stats_line_as_structured_content
+  # The description promises id as the first column; the CLI lets a bare
+  # list drop it, so the MCP layer puts it back.
+  def test_call_search_puts_id_first_in_a_bare_field_list
+    {
+      "flags time subject"   => "id flags time subject",
+      "subject,message-id"   => "id subject message-id",
+      "subject id mailbox"   => "id subject mailbox",
+      "id subject"           => "id subject",
+      "+tags"                => "+tags",
+    }.each do |given, expected|
+      seen = nil
+      Mailmate::CLI::Search.stub(:run, ->(argv) { seen = argv; 0 }) do
+        S.dispatch("search", "query" => "x", "fields" => given)
+      end
+      assert_equal expected, seen.last, "fields #{given.inspect}"
+    end
+  end
+
+  # Clients that support structuredContent show it instead of the text, so
+  # sending the stats there hid the rows. Rows and stats both stay in the text.
+  def test_call_search_keeps_rows_and_stats_in_the_text_only
     fake = lambda do |_argv|
       warn 'stats: {"schema":1,"matches":321,"returned":3,"scan_capped":false}'
       puts "id\n1"
       0
     end
     res = Mailmate::CLI::Search.stub(:run, fake) { S.dispatch("search", "query" => "x") }
-    assert_equal 321, res[:structuredContent][:stats]["matches"]
-    assert_includes res[:content].first[:text], "stats: {", "the line stays readable in the text too"
+    refute res.key?(:structuredContent)
+    text = res[:content].first[:text]
+    assert_includes text, "id\n1"
+    assert_includes text, 'stats: {"schema":1,"matches":321'
   end
 
   def test_call_search_leaves_a_malformed_stats_line_as_text

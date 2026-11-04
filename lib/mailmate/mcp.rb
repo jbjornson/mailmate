@@ -16,6 +16,7 @@ require "mailmate/cli/tags"
 require "mailmate/eml_lookup"
 require "mailmate/header_reader"
 require "mailmate/mid_url"
+require "mailmate/draft_reviser"
 
 module Mailmate
   # Stdio MCP server (JSON-RPC 2.0, line-delimited). Exposes the gem's CLIs —
@@ -41,6 +42,9 @@ module Mailmate
       `open` require MailMate to be running (they drive the app).
 
       Composing (send / draft)
+      - `send` is only offered when the server runs with
+        MAILMATE_MCP_ENABLE_SEND=1. Without it, compose with `draft` and let
+        the user review and send from MailMate.
       - Bodies are Markdown; MailMate renders them to HTML on the way out. For
         that to reach recipients, MailMate → Preferences → Composer must have
         "Preview: Display" = Always and "Replying/Forwarding HTML" = Always
@@ -51,6 +55,9 @@ module Mailmate
       - Prefer `draft` over `send` whenever the user said "don't send" / "just
         draft it" — `draft` physically cannot send, so it's the safe choice.
         `send` also opens a draft and waits unless you pass `send_now: true`.
+      - To change a saved draft, use `revise_draft`. MailMate can't edit a draft
+        in place, so it saves the revised copy and moves the old one to Trash.
+        Read the draft first with `message` if you only want to tweak it.
       - Replying: pass `reply_to` (the parent's eml-id or Message-ID) and the
         threading headers, recipient and "Re:" subject are derived for you.
         `reply_all_to` replies to all; `forward` forwards (supply `to`).
@@ -80,6 +87,9 @@ module Mailmate
         convert between them and to mint a cross-machine message:// URL.
     INSTRUCTIONS
 
+    # `search` shortens longer values (see call_search).
+    SEARCH_MAX_CELL = 200
+
     TOOLS = [
       {
         name: "search",
@@ -88,6 +98,8 @@ module Mailmate
         description: <<~DESC.strip,
           Search MailMate's .eml files using MailMate's quicksearch syntax.
           Returns column-aligned CSV. Same engine as the `mmsearch` CLI.
+          Values longer than #{SEARCH_MAX_CELL} characters are shortened and end
+          in …; use `message` for the full text.
 
           The only native key:value specs are the state forms below
           (is:unread, has:attachment). Other familiar foreign tokens
@@ -288,6 +300,26 @@ module Mailmate
         },
       },
       {
+        name: "revise_draft",
+        title: "Revise a draft",
+        annotations: { title: "Revise a draft", readOnlyHint: false, destructiveHint: false },
+        description: "Replace a saved draft with a revised version. Never sends. MailMate can't edit a draft in place, so this saves a new draft with your changes (fields you leave out are copied from the old draft, including reply threading) and then moves the old draft to Trash through MailMate. The old draft is only touched after the new one is saved and only when MailMate selects exactly that draft; otherwise it stays put and the result says why. Returns the new draft's eml-id for further revisions.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            id: { type: "string", description: "eml-id or RFC Message-ID of the draft to replace (it must be in a Drafts mailbox)." },
+            from: { type: "string", description: "New sender identity. Omit to keep the old one." },
+            to: { type: "string", description: "New recipient(s), comma-separated. Omit to keep the old ones." },
+            cc: { type: "string", description: "New CC recipient(s). Omit to keep; pass an empty string to clear." },
+            bcc: { type: "string", description: "New BCC recipient(s). Omit to keep; pass an empty string to clear." },
+            subject: { type: "string", description: "New subject. Omit to keep the old one." },
+            body: { type: "string", description: "New markdown body (the whole body). Omit to keep the old one." },
+          },
+          required: %w[id],
+          additionalProperties: false,
+        },
+      },
+      {
         name: "open",
         title: "Open in MailMate",
         annotations: { title: "Open in MailMate", readOnlyHint: false, destructiveHint: false },
@@ -355,6 +387,21 @@ module Mailmate
       },
     ].freeze
 
+    # Sending is opt-in. Mail content reaches the model, so a message could try
+    # to talk it into sending; with `send` off, the worst it can do is a draft
+    # the user reviews.
+    SEND_ENV = "MAILMATE_MCP_ENABLE_SEND"
+    SEND_DISABLED_MESSAGE = "Sending is disabled on this server (set #{SEND_ENV}=1 to enable). " \
+                            "Use the `draft` tool instead; the user can send it from MailMate."
+
+    def send_enabled?(env = ENV)
+      env[SEND_ENV] == "1"
+    end
+
+    def tools_list(env = ENV)
+      send_enabled?(env) ? TOOLS : TOOLS.reject { |t| t[:name] == "send" }
+    end
+
     def run(stdin: $stdin, stdout: $stdout)
       stdin.binmode
       stdout.binmode
@@ -389,7 +436,7 @@ module Mailmate
       when "notifications/initialized", "notifications/cancelled"
         # notifications — no response
       when "tools/list"
-        write(stdout, jsonrpc_result(id, { tools: TOOLS }))
+        write(stdout, jsonrpc_result(id, { tools: tools_list }))
       when "tools/call"
         params = msg["params"] || {}
         result = dispatch(params["name"], params["arguments"] || {})
@@ -408,8 +455,9 @@ module Mailmate
       when "message"        then call_message(args)
       when "modify"         then call_modify(args)
       when "verify"         then call_verify(args)
-      when "send"           then call_send(args)
+      when "send"           then send_enabled? ? call_send(args) : text_error(SEND_DISABLED_MESSAGE)
       when "draft"          then call_draft(args)
+      when "revise_draft"   then call_revise_draft(args)
       when "open"           then call_open(args)
       when "list_mailboxes" then call_list_mailboxes(args)
       when "list_tags"      then call_list_tags(args)
@@ -440,21 +488,30 @@ module Mailmate
       argv.push("--european")                        if args["european"]
       # Always ask for the stats line: it carries the true match total and
       # the truncation facts as one JSON object, first on stderr, in place
-      # of the prose notices. It stays in the text (readable as-is) and is
-      # ALSO surfaced as structuredContent for clients that render it.
+      # of the prose notices. It stays in the text only. It is not also sent
+      # as structuredContent: clients that support that field (Claude Code
+      # among them) show it in place of the text, which hid the result rows.
       argv.push("--stats")
+      # Spam subjects can run to thousands of characters, which can push a
+      # reply past what the client will show.
+      argv.push("--max-cell", SEARCH_MAX_CELL.to_s)
       # Positionals: search-string then fields. Only include if the caller
       # gave us either — otherwise let the CLI apply its defaults.
       if args.key?("query") || args["fields"]
         argv << (args["query"] || "")
-        argv << args["fields"].to_s if args["fields"]
+        argv << search_fields(args["fields"].to_s) if args["fields"]
       end
-      res = run_cli(Mailmate::CLI::Search, argv)
-      if (m = res[:content].first[:text].match(/^#{Regexp.escape(Mailmate::CLI::Search::STATS_PREFIX)}(\{.*\})$/))
-        stats = (JSON.parse(m[1]) rescue nil)
-        res[:structuredContent] = { stats: stats } if stats
-      end
-      res
+      run_cli(Mailmate::CLI::Search, argv)
+    end
+
+    # The tool promises `id` as the first column, since the other tools act
+    # on it. The CLI lets a bare field list leave it out, so add it here.
+    # A "+..." list already starts from the defaults, which include it.
+    def search_fields(fields)
+      return fields if fields.strip.start_with?("+")
+      names = fields.split(/[\s,]+/).reject(&:empty?)
+      return fields if names.empty?
+      (["id"] + (names - ["id"])).join(" ")
     end
 
     def call_message(args)
@@ -509,6 +566,10 @@ module Mailmate
 
     # `draft` mirrors `send` but never sends — it has no send_now option and
     # routes through CLI::Draft, which refuses `--send-now` outright.
+    def call_revise_draft(args)
+      Mailmate::DraftReviser.revise(args, compose: ->(a) { call_draft(a) })
+    end
+
     def call_draft(args)
       (err = recipient_check(args)) and return err
 

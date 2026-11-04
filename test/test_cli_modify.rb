@@ -295,17 +295,37 @@ class TestCliModify < Minitest::Test
   # through the AppleScript driver, so MailMate stays consistent with itself.
 
   def test_drive_pure_move_uses_fast_path
-    fast_calls = 0
-    ascript_calls = 0
-    M.stub(:try_fast_move, ->(_id, _path, _target, _opts) { fast_calls += 1; "/new/path/42.eml" }) do
-      M.stub(:drive_via_applescript, ->(*_args) { ascript_calls += 1 }) do
-        Mailmate::EmlLookup.stub(:path_for, ->(_id) { "/original/42.eml" }) do
-          M.drive(42, "<m@x>", [["move", "moveToMailbox:", ["Archive"]]], {})
+    M.stub(:fast_move_enabled?, true) do
+      fast_calls = 0
+      ascript_calls = 0
+      M.stub(:try_fast_move, ->(_id, _path, _target, _opts) { fast_calls += 1; "/new/path/42.eml" }) do
+        M.stub(:drive_via_applescript, ->(*_args) { ascript_calls += 1 }) do
+          Mailmate::EmlLookup.stub(:path_for, ->(_id) { "/original/42.eml" }) do
+            M.drive(42, "<m@x>", [["move", "moveToMailbox:", ["Archive"]]], {})
+          end
         end
       end
+      assert_equal 1, fast_calls,  "pure-move chain must hit the fast path"
+      assert_equal 0, ascript_calls, "pure-move chain must NOT activate the AppleScript driver"
     end
-    assert_equal 1, fast_calls,  "pure-move chain must hit the fast path"
-    assert_equal 0, ascript_calls, "pure-move chain must NOT activate the AppleScript driver"
+  end
+
+  def test_drive_pure_move_goes_through_mailmate_by_default
+    fast_calls = 0
+    seen_actions = nil
+    M.stub(:try_fast_move, ->(*_args) { fast_calls += 1; "/never/called" }) do
+      M.stub(:drive_via_applescript, ->(_eml, _mid, actions, _opts) { seen_actions = actions; true }) do
+        M.drive(42, "<m@x>", [["move", "moveToMailbox:", ["Archive"]]], {})
+      end
+    end
+    assert_equal 0, fast_calls, "fast path is opt-in"
+    assert_equal [["move", "moveToMailbox:", ["Archive"]]], seen_actions
+  end
+
+  def test_fast_move_needs_exactly_1
+    assert M.fast_move_enabled?({ "MAILMATE_FAST_MOVE" => "1" })
+    refute M.fast_move_enabled?({})
+    refute M.fast_move_enabled?({ "MAILMATE_FAST_MOVE" => "true" })
   end
 
   def test_drive_mixed_chain_skips_fast_path
@@ -326,16 +346,46 @@ class TestCliModify < Minitest::Test
   end
 
   def test_drive_multiple_moves_only_still_uses_fast_path
-    fast_calls = 0
-    M.stub(:try_fast_move, ->(_id, _path, _target, _opts) { fast_calls += 1; "/p/42.eml" }) do
-      M.stub(:drive_via_applescript, ->(*_args) { flunk "AppleScript path must not run for pure-move chain" }) do
-        Mailmate::EmlLookup.stub(:path_for, ->(_id) { "/orig/42.eml" }) do
-          M.drive(42, "<m@x>", [["move", "moveToMailbox:", ["A"]],
-                                ["move", "moveToMailbox:", ["B"]]], {})
+    M.stub(:fast_move_enabled?, true) do
+      fast_calls = 0
+      M.stub(:try_fast_move, ->(_id, _path, _target, _opts) { fast_calls += 1; "/p/42.eml" }) do
+        M.stub(:drive_via_applescript, ->(*_args) { flunk "AppleScript path must not run for pure-move chain" }) do
+          Mailmate::EmlLookup.stub(:path_for, ->(_id) { "/orig/42.eml" }) do
+            M.drive(42, "<m@x>", [["move", "moveToMailbox:", ["A"]],
+                                  ["move", "moveToMailbox:", ["B"]]], {})
+          end
+        end
+      end
+      assert_equal 2, fast_calls
+    end
+  end
+
+  # ---- no viewer window: refuse instead of acting on the selection ----
+
+  class NoWindowDriver
+    attr_reader :performed, :opens
+
+    def initialize(*) = (@performed = []; @opens = 0)
+    def window_ids = [1]
+    def open_url(_url) = @opens += 1
+    def perform(selector, *args) = @performed << [selector, *args]
+    def close_windows(_ids) = nil
+  end
+
+  def test_drive_via_applescript_refuses_when_no_viewer_window_appears
+    driver = NoWindowDriver.new
+    ok = nil
+    _out, err = capture_io do
+      Mailmate::AppleScriptDriver.stub(:new, driver) do
+        M.stub(:should_preserve_unread?, false) do
+          ok = M.drive_via_applescript(42, "<m@x>", [["delete", "deleteMessage:", []]], { settle: 0.01 })
         end
       end
     end
-    assert_equal 2, fast_calls
+    refute ok, "must report failure when the target window never appeared"
+    assert_empty driver.performed, "must not perform any selector without a viewer window"
+    assert_equal 2, driver.opens, "opens once, then retries once"
+    assert_match(/REFUSED/, err)
   end
 
   # ---- verifiable_expectations: which chains get effect-checked ----

@@ -21,6 +21,33 @@ class TestConfig < Minitest::Test
     assert_equal "/tmp/mm/Identities.plist", cfg.identities_plist
   end
 
+  def test_imap_root_uses_messages_when_only_spotlight_store_exists
+    Dir.mktmpdir do |dir|
+      FileUtils.mkdir_p(File.join(dir, "Messages", "IMAP"))
+      cfg = Mailmate::Config.new(yaml_path: "/nonexistent", env: { "MAILMATE_APP_SUPPORT_DIR" => dir })
+      assert_equal File.join(dir, "Messages", "IMAP"), cfg.imap_root
+    end
+  end
+
+  def test_imap_root_prefers_noindex_when_both_exist
+    Dir.mktmpdir do |dir|
+      FileUtils.mkdir_p(File.join(dir, "Messages", "IMAP"))
+      FileUtils.mkdir_p(File.join(dir, "Messages.noindex", "IMAP"))
+      cfg = Mailmate::Config.new(yaml_path: "/nonexistent", env: { "MAILMATE_APP_SUPPORT_DIR" => dir })
+      assert_equal File.join(dir, "Messages.noindex", "IMAP"), cfg.imap_root
+    end
+  end
+
+  def test_imap_root_follows_a_rename_while_running
+    Dir.mktmpdir do |dir|
+      FileUtils.mkdir_p(File.join(dir, "Messages.noindex", "IMAP"))
+      cfg = Mailmate::Config.new(yaml_path: "/nonexistent", env: { "MAILMATE_APP_SUPPORT_DIR" => dir })
+      assert_equal File.join(dir, "Messages.noindex", "IMAP"), cfg.imap_root
+      File.rename(File.join(dir, "Messages.noindex"), File.join(dir, "Messages"))
+      assert_equal File.join(dir, "Messages", "IMAP"), cfg.imap_root
+    end
+  end
+
   def test_yaml_loading
     Dir.mktmpdir do |dir|
       path = File.join(dir, "config.yml")

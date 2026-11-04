@@ -72,6 +72,22 @@ class TestDiscover < Minitest::Test
     end
   end
 
+  def test_read_identities_extracts_addresses_from_display_names
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "Identities.plist")
+      json = <<~JSON
+        { "identities": [
+            { "emailAddresses": "jane@example.com,Jane Doe <jane.doe@example.com>,Team (Ops) <ops@example.org>" },
+            { "emailAddresses": "\\"Quoted, Name\\" <q@example.net>" }
+          ]
+        }
+      JSON
+      File.write(path, json)
+      ids = Mailmate::CLI::Discover.read_identities(path)
+      assert_equal %w[jane.doe@example.com jane@example.com ops@example.org q@example.net], ids.sort
+    end
+  end
+
   def test_read_identities_missing_file_returns_empty
     assert_equal [], Mailmate::CLI::Discover.read_identities("/nonexistent/Identities.plist")
   end
