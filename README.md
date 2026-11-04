@@ -4,6 +4,8 @@ Ruby toolkit for [MailMate](https://freron.com) on macOS — a smart-mailbox fil
 
 **Requires macOS with MailMate installed.** The library code (filter parser, evaluator) works anywhere, but the integration with MailMate itself — AppleScript, on-disk index reads, the `emate` binary — is macOS-only by way of MailMate being macOS-only.
 
+> **This is a fork of [brianmd/mailmate](https://github.com/brianmd/mailmate)** with local fixes for MailMate 2.0 (see [PR #1](https://github.com/jbjornson/mailmate/pull/1)). The Claude Code plugin, Cowork, and from-source installs below use this fork. The one-line installer and `gem install mailmate` install brianmd's released gem from RubyGems, which doesn't have these fixes.
+
 ## Privacy Policy
 
 This gem — including its MCP server — contains **no networking code at all**.
@@ -54,8 +56,8 @@ Pick the path that matches how you'll use it:
 This repo doubles as a Claude Code plugin marketplace. Inside Claude Code:
 
 ```
-/plugin marketplace add brianmd/mailmate
-/plugin install mailmate@brianmd
+/plugin marketplace add jbjornson/mailmate
+/plugin install mailmate@jbjornson
 ```
 
 The plugin's MCP server self-provisions on first launch — Ruby (if needed) and gem dependencies go into `~/.mailmate-mcp`; nothing touches your system Ruby, Homebrew, or shell profile. It runs the plugin's bundled source, so plugin updates take effect without waiting for a gem release. Uninstall: `/plugin uninstall mailmate`, then `rm -rf ~/.mailmate-mcp`.
@@ -64,7 +66,7 @@ The plugin's MCP server self-provisions on first launch — Ruby (if needed) and
 
 The same plugin works in Cowork on the macOS desktop app — verified end to end, including a from-scratch first run:
 
-1. In Cowork: **Customize → Plugins → + → Add marketplace** → `brianmd/mailmate`, then install **mailmate** from the Discover tab.
+1. In Cowork: **Customize → Plugins → + → Add marketplace** → `jbjornson/mailmate`, then install **mailmate** from the Discover tab.
 2. Ask Claude about your mail. The first launch provisions the runtime inside Cowork's sandbox, which can take a minute or two, and Cowork will ask you to **allow the connector's commands and file access** — those approvals are the gate to your local mail store.
 3. The Claude desktop app must be running on the Mac where MailMate lives; `send`, `draft`, `modify`, and `open` additionally need the MailMate app running (as always).
 
@@ -75,6 +77,8 @@ Cowork runs the connector through the desktop app's sandboxed bridge, so its pro
 ```bash
 curl -fsSL https://raw.githubusercontent.com/brianmd/mailmate/main/install.sh | bash
 ```
+
+This installs brianmd's released gem from RubyGems, not this fork. For the fork's fixes, use the plugin above or install from source.
 
 Installs the released gem into an isolated `GEM_HOME` under `~/.mailmate-mcp` (provisioning a private Ruby only if none ≥ 3.0 is found), writes a launcher shim, and registers it with Claude Code when the `claude` CLI is present (pass `--no-register` to skip). For Claude Desktop, add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 
@@ -93,6 +97,8 @@ Installs the released gem into an isolated `GEM_HOME` under `~/.mailmate-mcp` (p
 ```bash
 gem install mailmate
 ```
+
+This is brianmd's released gem, without this fork's fixes; see [From source](#from-source-development) for the fork.
 
 Then optionally bootstrap your config (will happen automatically on first invocation of any command from an interactive shell if it hasn't been run before):
 
@@ -121,7 +127,7 @@ If you never use `--markdown` or compose from a parent, you never pay any of thi
 If you're hacking on the gem itself, skip `gem install` and put the repo's `exe/` on your `PATH`. Clone wherever you keep source repos, then prepend its `exe/` to `PATH` from your shell's rc file (`~/.zshrc`, `~/.bashrc`, etc.):
 
 ```bash
-git clone https://github.com/brianmd/mailmate.git
+git clone https://github.com/jbjornson/mailmate.git
 cd mailmate
 
 # In your shell rc file, add (adjust the path to wherever you cloned):

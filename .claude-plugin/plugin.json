@@ -6,8 +6,8 @@
     "name": "Brian Murphy-Dye",
     "email": "brian@murphydye.com"
   },
-  "homepage": "https://github.com/brianmd/mailmate",
-  "repository": "https://github.com/brianmd/mailmate",
+  "homepage": "https://github.com/jbjornson/mailmate",
+  "repository": "https://github.com/jbjornson/mailmate",
   "license": "MIT",
   "keywords": ["mailmate", "email", "mail", "macos", "mcp"],
   "mcpServers": {

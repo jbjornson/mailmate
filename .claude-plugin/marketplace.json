@@ -1,9 +1,8 @@
 {
-  "name": "brianmd",
-  "description": "Brian Murphy-Dye's Claude Code plugins — currently the MailMate mail toolkit for macOS.",
+  "name": "jbjornson",
+  "description": "Josh Bjornson's fork of brianmd/mailmate — the MailMate mail toolkit for macOS, with local fixes for MailMate 2.0.",
   "owner": {
-    "name": "Brian Murphy-Dye",
-    "email": "brian@murphydye.com"
+    "name": "Josh Bjornson"
   },
   "plugins": [
     {
